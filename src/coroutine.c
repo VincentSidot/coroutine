@@ -4,6 +4,11 @@
 #include <sys/mman.h>
 #include <stdbool.h>
 
+#ifndef MAP_ANONYMOUS
+// macOS uses MAP_ANON
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
 #include "array.h"
 #include "coroutine.h"
 
@@ -82,7 +87,16 @@ sp_ctx create_ctx(coroutine fn, void* arg) {
 
     sp_ctx ctx = malloc(sizeof(*ctx));
 
-    ctx->stack_base =  mmap(NULL, STACK_CAPACITY, PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_STACK|MAP_ANONYMOUS|MAP_GROWSDOWN, -1, 0);
+    int prot = PROT_WRITE | PROT_READ;
+    int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+#ifdef MAP_STACK
+    flags |= MAP_STACK;
+#endif
+#ifdef MAP_GROWSDOWN
+    flags |= MAP_GROWSDOWN;
+#endif
+
+    ctx->stack_base =  mmap(NULL, STACK_CAPACITY, prot, flags, -1, 0);
     assert(ctx->stack_base != MAP_FAILED && "Failed to allocate stack for coroutine");
 
     ctx->rsp = platform_setup_stack(ctx->stack_base + STACK_CAPACITY, fn, coroutine_finish, arg);

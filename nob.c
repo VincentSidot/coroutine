@@ -8,13 +8,16 @@
 #define SRC_DIR "src/"
 #define BUILD_DIR "build/"
 
-// If linux x86_64, set app name to app_linux_x86_64
+// Platform selection
 #if defined(__linux__) && defined(__x86_64__)
     #define ARCH_DIR "linux_x86_64/"
     #define ARCH "linux_x86_64"
+#elif defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    #define ARCH_DIR "macos_aarch64/"
+    #define ARCH "macos_aarch64"
 #else
     #error "Unsupported platform"
-#endif // __linux__ && __x86_64__
+#endif
 
 #define LIB_DIR BUILD_DIR "coroutine_" ARCH "/"
 
@@ -101,21 +104,21 @@ bool build_example(char* name, bool debug) {
 
 struct args {
     bool debug;
-    bool static_link;
+    bool run;
     char* example_name;
 };
 
 bool parse_args(struct args* args, int argc, char** argv) {
 
     args->debug = false;
-    args->static_link = false;
+    args->run = false;
     args->example_name = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-g") == 0) {
             args->debug = true;
-        } else if (strcmp(argv[i], "--static") == 0) {
-            args->static_link = true;
+        } else if (strcmp(argv[i], "--run") == 0 || strcmp(argv[i], "-r") == 0) {
+            args->run = true;
         } else {
             args->example_name = argv[i];
         }
@@ -138,6 +141,12 @@ int main(int argc, char** argv) {
 
     if (args.example_name != NULL) {
         if (!build_example(args.example_name, args.debug)) return 1;
+        if (args.run) {
+            String_Builder exe_path = {};
+            nob_sb_appendf(&exe_path, BUILD_DIR "%s", args.example_name);
+            cmd_append(&cmd, exe_path.items);
+            if (!cmd_run(&cmd)) return 1;
+        }
     }
     return 0;
 }

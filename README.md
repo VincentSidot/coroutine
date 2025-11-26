@@ -1,54 +1,87 @@
-# Coroutine Playground (Linux x86_64)
+# Coroutine Library
 
-This repository implements a tiny user-space coroutine/scheduler for Linux x86_64 with hand-written assembly. It is intentionally minimal so you can study how stacks and register frames are built and swapped.
+A tiny coroutine runtime that lets you spin up user-space contexts with a few C calls. Stacks are allocated with `mmap`, execution is switched with a handful of assembly stubs, and the scheduler is an in-process list of contexts. Supported targets:
 
-## Quick Start
-- Build helper: `cc -o nob nob.c`
-- Build demo: `./nob` → emits `build/app`
-- Run demo: `./build/app` (prints coroutine interleaving with context ids and addresses)
+- Linux x86_64
+- macOS aarch64 (Apple Silicon)
 
-## How It Works
+## Requirements
+- Supported platform/arch (above)
+- GCC or Clang
+- No external deps; the build helper `nob` binary is included (`nob.c` if you want to rebuild it)
 
-### Data Structures
-- Context type: `struct s_ctx` in `src/coroutine.c` holds:
-  - `rsp`: saved stack pointer for the coroutine
-  - `stack_base`: mmap’ed stack memory base
-  - `is_done`: completion flag
-- Global registry: `g_ctx` (dynamic array from `array.h`) stores all active contexts. `current_ctx_idx` tracks which entry is running (index `0` is the implicit main context).
+## Build & Run
+- Build the static library and keep headers ready for linking:
+  - `./nob` (release) or `./nob --debug`
+  - Outputs to `build/coroutine_linux_x86_64/{lib,include}`
+- Build an example: `./nob ping_pong` (produces `build/ping_pong`)
+- Run an example: `./build/ping_pong`
 
-### Stack Creation
-1. `create_ctx(fn, arg)` (in `src/coroutine.c`) lazily creates the main context and then allocates a coroutine stack with `mmap` sized at `STACK_CAPACITY` (`1024 * getpagesize()`).
-2. The stack top pointer (`stack_base + STACK_CAPACITY`) is passed to `platform_setup_stack` (`src/linux_x86_64/platform.c`), which lays out an initial frame:
-   - Return address → `coroutine_finish` (runs when `fn` returns).
-   - Next return address → `fn` (so `ret` jumps into the coroutine body).
-   - Callee-saved registers (`r15`…`rbx`, `rbp`) and `rdi` slot with the argument.
-   - 16-byte alignment padding for the System V ABI.
-3. The prepared stack pointer is stored in the context and pushed into `g_ctx`.
+## API at a Glance
+```c
+sp_ctx create_ctx(coroutine fn, void* arg); // allocate stack, schedule coroutine
+void   destroy_ctx(sp_ctx ctx);             // free stack resources
+bool   is_ctx_finished(sp_ctx ctx);         // has coroutine returned?
 
-### Execution Flow
-1. The demo (`src/main.c`) creates two contexts and then repeatedly calls `yield_ctx()`.
-2. `yield_ctx` is defined in assembly (`src/linux_x86_64/asm.s`). It saves callee-saved registers onto the current stack, aligns the stack, moves the new `rsp` into `rdi`, and jumps to `yield_ctx_inner` (C).
-3. `yield_ctx_inner` saves the current `rsp` into the current context, advances `current_ctx_idx` to the previous entry (wrapping from `0` to last), loads the target context, and calls `_asm_restore_ctx`.
-4. `_asm_restore_ctx` switches stacks by moving the saved `rsp` into `%rsp`, pops registers in reverse, restores `rdi`, and executes `ret`. Control lands either back inside another coroutine or, if it returns from the coroutine body, into `coroutine_finish`.
-5. `coroutine_finish` marks the context as done, removes it from `g_ctx`, and jumps back to the prior context with `_asm_restore_ctx`.
+void   switch_ctx(sp_ctx ctx);              // jump to a specific coroutine
+void   yield_ctx(void);                     // cooperatively yield to the scheduler
 
-### Assembly Primitives
-- `yield_ctx`: save registers, align stack, jump into C scheduler to pick the next context.
-- `switch_ctx`: similar to `yield_ctx` but switches to an explicit target (`switch_ctx_inner`).
-- `_asm_restore_ctx`: load a saved stack frame and return into whatever return address was staged during stack setup.
+size_t get_ctx_id(void);                    // index in the scheduler list
+sp_ctx get_ctx_ptr(void);                   // pointer to the current context
+```
 
-### Scheduler Notes
-- Scheduling is cooperative and round-robin over the `g_ctx` array (reverse order: main → last → …). Contexts voluntarily yield; there is no preemption.
-- Stacks are per-coroutine and freed via `destroy_ctx` (manual; not invoked in the demo).
-- `is_ctx_finished` reports completion; the demo loops until all non-main contexts are done.
+Minimal usage pattern:
+```c
+void worker(void* arg) {
+    for (int i = 0; i < 3; i++) {
+        printf("ctx %zu -> %d\n", get_ctx_id(), i);
+        yield_ctx(); // hand control back
+    }
+}
 
-## Files of Interest
-- `src/coroutine.c` / `src/coroutine.h` – context management, scheduler core.
-- `src/linux_x86_64/asm.s` – register save/restore and context switch glue.
-- `src/linux_x86_64/platform.c` – stack frame bootstrap for new coroutines.
-- `nob.c` / `nob.h` – tiny build helper that compiles the demo.
+int main(void) {
+    sp_ctx a = create_ctx(worker, NULL);
+    sp_ctx b = create_ctx(worker, NULL);
 
-## Extending / Porting
-- Add a new architecture directory under `src/<arch>/` with equivalents of `asm.s` and `platform.c`.
-- Verify stack alignment rules and callee-saved registers for the target ABI.
-- Consider adding test harnesses (e.g., stack overflow checks, nested yields, destruction paths).
+    while (!is_ctx_finished(a) || !is_ctx_finished(b)) {
+        yield_ctx(); // drive scheduling from main
+    }
+
+    destroy_ctx(a);
+    destroy_ctx(b);
+}
+```
+
+## How It Works (Architecture)
+**Contexts:** Each coroutine is an `s_ctx` holding `rsp`, the base of its allocated stack, and a `is_done` flag. Contexts live in a dynamic array (`g_ctx`), and `current_ctx_idx` tracks which one is executing. The main program becomes context 0 on the first `create_ctx` call.
+
+**Stacks:** `create_ctx` uses `mmap` with `MAP_STACK | MAP_GROWSDOWN` to reserve a per-coroutine stack (`STACK_CAPACITY` = 1024 * page size). `platform_setup_stack` seeds that stack with:
+- A fake return address pointing to `coroutine_finish`
+- The coroutine function pointer
+- Saved registers (callee-saved) and the initial argument in the right order
+This makes the first `_asm_restore_ctx` place the stack exactly as if the coroutine had been called normally.
+
+**Switching:** The assembly entry points live in `src/linux_x86_64/asm.s` (SysV) and `src/macos_aarch64/asm.s` (AAPCS64).
+- `switch_ctx`: saves callee-saved registers, writes the current stack pointer into the active context, loads the target context stack, and jumps to `switch_ctx_inner` (C) which updates `current_ctx_idx` before `_asm_restore_ctx` resumes execution.
+- `yield_ctx`: same register save, but selects the previous context in the list (wrapping to the last) before restoring.
+- `_asm_restore_ctx`: sets the hardware stack pointer to the saved stack, restores callee-saved registers, and `ret`—the initial stack was primed so that the first return jumps into the coroutine function and that function returns into `coroutine_finish`.
+
+**Finishing:** When a coroutine returns, control lands in `coroutine_finish`: it marks the context done, removes it from `g_ctx` without preserving order, updates `current_ctx_idx` to a valid remaining context, and restores into it. `is_ctx_finished` simply reads the flag; `destroy_ctx` unmaps and frees the context memory when you are done observing it.
+
+**Scheduling Model:** Cooperative and minimal:
+- `yield_ctx` rotates to the previous context (LIFO-ish; main is index 0).
+- `switch_ctx` lets you jump directly to a known context for explicit handoffs.
+- The runtime does not preempt; your coroutines must yield or switch explicitly.
+
+## Examples
+- `examples/cpt.c`: basic counter with two coroutines interleaving `yield_ctx`.
+- `examples/ping_pong.c`: explicit `switch_ctx` handoff between paired coroutines.
+- `examples/producer_consumer.c`: bounded buffer with cooperative backpressure.
+
+Build any example with `./nob <name>` and run from `./build/<name>`.
+
+## Caveats and Limits
+- Single-threaded: the scheduler and context list are not thread-safe.
+- Fixed stack size per coroutine (tuned via `STACK_CAPACITY` in `coroutine.c`).
+- Platform-specific: only Linux x86_64 assembly/ABI is implemented.
+- No signal safety or async preemption; everything is cooperative.
