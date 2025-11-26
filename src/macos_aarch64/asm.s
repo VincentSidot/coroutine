@@ -1,11 +1,11 @@
 .text
-.globl _asm_restore_ctx
-.globl _coroutine_entry
-.globl switch_ctx
-.globl yield_ctx
+.globl __asm_restore_ctx
+.globl __coroutine_entry
+.globl _switch_ctx
+.globl _yield_ctx
 
 // Restore context from saved stack pointer (x0)
-_asm_restore_ctx:
+__asm_restore_ctx:
     mov     sp, x0
 
     ldp     x29, x30, [sp], #16
@@ -16,9 +16,9 @@ _asm_restore_ctx:
     ldp     x19, x20, [sp], #16
     ret
 
-// switch_ctx(sp_ctx ctx)
-// Saves callee-saved registers and jumps to switch_ctx_inner(current_sp, ctx)
-switch_ctx:
+// _switch_ctx(sp_ctx ctx)
+// Saves callee-saved registers and jumps to _switch_ctx_inner(current_sp, ctx)
+_switch_ctx:
     stp     x19, x20, [sp, #-16]!
     stp     x21, x22, [sp, #-16]!
     stp     x23, x24, [sp, #-16]!
@@ -28,11 +28,11 @@ switch_ctx:
 
     mov     x1, x0      // ctx
     mov     x0, sp      // current stack pointer
-    bl      switch_ctx_inner
+    bl      _switch_ctx_inner
 
-// yield_ctx(void)
-// Saves callee-saved registers and jumps to yield_ctx_inner(current_sp)
-yield_ctx:
+// _yield_ctx(void)
+// Saves callee-saved registers and jumps to _yield_ctx_inner(current_sp)
+_yield_ctx:
     stp     x19, x20, [sp, #-16]!
     stp     x21, x22, [sp, #-16]!
     stp     x23, x24, [sp, #-16]!
@@ -41,11 +41,11 @@ yield_ctx:
     stp     x29, x30, [sp, #-16]!
 
     mov     x0, sp
-    bl      yield_ctx_inner
+    bl      _yield_ctx_inner
 
 // Entry trampoline for a new coroutine
 // x19: arg, x20: fn, x21: coroutine_finish
-_coroutine_entry:
+__coroutine_entry:
     mov     x0, x19      // arg
     mov     x9, x20      // fn pointer
     mov     x30, x21     // set return address to coroutine_finish

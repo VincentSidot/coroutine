@@ -23,6 +23,12 @@
 
 #define STATIC_LIB_NAME "libcoroutine.a"
 
+#ifdef __APPLE__
+    #define LINK_FLAGS "-lcoroutine"
+#else
+    #define LINK_FLAGS "-l:" STATIC_LIB_NAME
+#endif
+
 Cmd cmd = {};
 
 bool create_library(bool dbg) {
@@ -91,7 +97,7 @@ bool build_example(char* name, bool debug) {
 
     cmd_append(&cmd, source_path.items);
     cmd_append(&cmd, "-L", LIB_DIR "lib");
-    cmd_append(&cmd, "-l:" STATIC_LIB_NAME);
+    cmd_append(&cmd, LINK_FLAGS);
     cmd_append(&cmd, "-o", exe_path.items);
 
     if (!cmd_run(&cmd)) return false;
