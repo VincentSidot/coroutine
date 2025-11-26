@@ -1,46 +1,143 @@
+#include <string.h>
+
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
-#define SRC_FOLDER "src/"
-#define BUILD_FOLDER "build/"
+#define EXAMPLE_DIR "examples/"
+#define SRC_DIR "src/"
+#define BUILD_DIR "build/"
 
 // If linux x86_64, set app name to app_linux_x86_64
 #if defined(__linux__) && defined(__x86_64__)
-    #define ARCH_FOLDER "linux_x86_64/"
+    #define ARCH_DIR "linux_x86_64/"
+    #define ARCH "linux_x86_64"
 #else
     #error "Unsupported platform"
 #endif // __linux__ && __x86_64__
 
-#define APP_NAME "app"
+#define LIB_DIR BUILD_DIR "coroutine_" ARCH "/"
+
+#define STATIC_LIB_NAME "libcoroutine.a"
+
+Cmd cmd = {};
+
+bool create_library(bool dbg) {
+
+    const char* sources[] = {
+        SRC_DIR "coroutine.c",
+        SRC_DIR ARCH_DIR "asm.s",
+        SRC_DIR ARCH_DIR "platform.c",
+    };
+
+    const char* objects[] = {
+        BUILD_DIR "coroutine.o",
+        BUILD_DIR "asm.o",
+        BUILD_DIR "platform.o",
+    };
+
+    for (size_t i = 0; i < NOB_ARRAY_LEN(sources); i++) {
+        cmd_append(&cmd, "cc", "-Wall", "-Wextra");
+        if (dbg) cmd_append(&cmd, "-g");
+        else cmd_append(&cmd, "-O3");
+
+        cmd_append(&cmd, "-I", SRC_DIR);
+        cmd_append(&cmd, "-c", "-fPIC", sources[i], "-o", objects[i]);
+
+        if (!cmd_run(&cmd)) return false;
+    }
+
+    // Reset archive to avoid stale members (e.g., previous shared objects)
+    cmd_append(&cmd, "rm", "-f", BUILD_DIR STATIC_LIB_NAME);
+    if (!cmd_run(&cmd)) return false;
+
+    // Create static library
+    cmd_append(&cmd, "ar", "rcs",
+        BUILD_DIR STATIC_LIB_NAME,
+        objects[0], objects[1], objects[2]
+    );
+
+    if (!cmd_run(&cmd)) return false;
+
+
+    // Setup the library for linking
+    if (!mkdir_if_not_exists(LIB_DIR)) return false;
+    if (!mkdir_if_not_exists(LIB_DIR "lib")) return false;
+    if (!mkdir_if_not_exists(LIB_DIR "include")) return false;
+
+    if (!copy_file(BUILD_DIR STATIC_LIB_NAME, LIB_DIR "lib/" STATIC_LIB_NAME)) return false;
+    if (!copy_file(SRC_DIR "coroutine.h", LIB_DIR "include/coroutine.h")) return false;
+
+    nob_log(NOB_INFO, "Created library at: %s", LIB_DIR);
+
+    return true;
+}
+
+bool build_example(char* name, bool debug) {
+    cmd_append(&cmd, "cc", "-Wall", "-Wextra");
+    if (debug) cmd_append(&cmd, "-g");
+    else cmd_append(&cmd, "-O3");
+
+    cmd_append(&cmd, "-I", LIB_DIR "include");
+    String_Builder source_path = {};
+    String_Builder exe_path = {};
+
+    nob_sb_appendf(&source_path, EXAMPLE_DIR "%s.c", name);
+    nob_sb_appendf(&exe_path, BUILD_DIR "%s", name);
+
+
+    cmd_append(&cmd, source_path.items);
+    cmd_append(&cmd, "-L", LIB_DIR "lib");
+    cmd_append(&cmd, "-l:" STATIC_LIB_NAME);
+    cmd_append(&cmd, "-o", exe_path.items);
+
+    if (!cmd_run(&cmd)) return false;
+
+    nob_log(NOB_INFO, "Built example: %s", exe_path.items);
+
+    return true;
+
+}
+
+struct args {
+    bool debug;
+    bool static_link;
+    char* example_name;
+};
+
+bool parse_args(struct args* args, int argc, char** argv) {
+
+    args->debug = false;
+    args->static_link = false;
+    args->example_name = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-g") == 0) {
+            args->debug = true;
+        } else if (strcmp(argv[i], "--static") == 0) {
+            args->static_link = true;
+        } else {
+            args->example_name = argv[i];
+        }
+    }
+
+    return true;
+
+}
 
 int main(int argc, char** argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
-    if (!mkdir_if_not_exists(BUILD_FOLDER)) {
-        return 1;
+
+    struct args args = {};
+
+    if (!parse_args(&args, argc, argv)) return 1;
+
+    if (!mkdir_if_not_exists(BUILD_DIR)) return 1;
+    if (!create_library(args.debug)) return 1;
+
+    if (args.example_name != NULL) {
+        if (!build_example(args.example_name, args.debug)) return 1;
     }
-
-    Cmd cmd = {};
-
-    cmd_append(&cmd, "cc", "-Wall", "-Wextra");
-    cmd_append(&cmd, "-g");
-
-    cmd_append(&cmd, "-I", SRC_FOLDER);
-
-    cmd_append(&cmd,
-        SRC_FOLDER "main.c",
-        SRC_FOLDER "coroutine.c",
-        SRC_FOLDER ARCH_FOLDER "asm.s",
-        SRC_FOLDER ARCH_FOLDER "platform.c",
-    );
-
-
-    cmd_append(&cmd, "-o", BUILD_FOLDER APP_NAME);
-
-    if (!cmd_run(&cmd)) {
-        return 1;
-    }
-
     return 0;
 }

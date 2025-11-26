@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include "coroutine.h"
 
 void cpt(int cpt) {
