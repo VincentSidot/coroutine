@@ -12,8 +12,6 @@
 #include "array.h"
 #include "coroutine.h"
 
-#define STACK_CAPACITY (1024*getpagesize())
-
 struct s_ctx{
     void *rsp;
     void *stack_base;
@@ -113,11 +111,15 @@ sp_ctx create_ctx(coroutine fn, void* arg) {
  * @param ctx The coroutine context to destroy
  */
 void destroy_ctx(sp_ctx ctx) {
+    assert(ctx != NULL && "Cannot destroy main context");
+
     munmap(ctx->stack_base, STACK_CAPACITY);
     free(ctx);
 }
 
 bool is_ctx_finished(sp_ctx ctx) {
+    if (ctx == NULL) return false; // Main context is never finished
+
     return ctx->is_done;
 }
 
@@ -127,11 +129,16 @@ size_t get_ctx_id(void) {
 
 sp_ctx get_ctx_ptr(void) {
     size_t idx = get_ctx_id();
+    if (idx == 0) return NULL; // Main context
+
     assert(idx != INVALID_CTX_IDX && "No current context");
     return g_ctx.items[idx];
 }
 
 size_t get_idx_of(sp_ctx ctx) {
+    if (ctx == NULL) return 0; // Main context
+
+
     for (size_t i = 0; i < g_ctx.count; i++) {
         if (g_ctx.items[i] == ctx) {
             return i;
@@ -142,6 +149,10 @@ size_t get_idx_of(sp_ctx ctx) {
 }
 
 void switch_ctx_inner(void* curent_rsp, sp_ctx ctx) {
+    if (ctx == NULL) {
+        ctx = g_ctx.items[0]; // Main context
+    }
+
     sp_ctx current_ctx = g_ctx.items[current_ctx_idx];
     // Save current rsp
     current_ctx->rsp = curent_rsp;
