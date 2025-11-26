@@ -4,6 +4,15 @@
 .globl _switch_ctx
 .globl _yield_ctx
 
+/* Note: This is for macOS on ARM64 (Apple Silicon)
+    - Calling convention:
+        - First 8 integer/pointer arguments are passed in x0-x7
+        - 9+ arguments are passed on the stack
+    - Callee-saved registers: x19-x28, x29 (frame pointer), x30 (link register)
+    - Stack must be 16-byte aligned at function call boundaries
+    - Stack grows downwards
+*/
+
 // Restore context from saved stack pointer (x0)
 __asm_restore_ctx:
     mov     sp, x0
@@ -26,8 +35,7 @@ _switch_ctx:
     stp     x27, x28, [sp, #-16]!
     stp     x29, x30, [sp, #-16]!
 
-    mov     x1, x0      // ctx
-    mov     x0, sp      // current stack pointer
+    mov     x1, sp      // current stack pointer
     bl      _switch_ctx_inner
 
 // _yield_ctx(void)

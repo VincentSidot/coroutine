@@ -48,8 +48,7 @@ switch_ctx:
     pushq %r15              /* Save r15 */
     subq $8, %rsp           /* Align stack to 16 bytes */
 
-    movq %rdi, %rsi         /* Save current rsp to the context */
-    movq %rsp, %rdi         /* Load new rsp from the context */
+    movq %rsp, %rsi         /* Load new rsp from the context */
 
     jmp switch_ctx_inner    /* Jump to inner switch function */
 
