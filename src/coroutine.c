@@ -48,8 +48,6 @@ void switch_ctx(sp_ctx);
  */
 void yield_ctx(void);
 
-#include <stdio.h>
-
 void coroutine_finish(void) {
     assert(current_ctx_idx != 0 && "Main context cannot finish");
     sp_ctx current_ctx = g_ctx.items[current_ctx_idx];
