@@ -5,6 +5,7 @@
 #include "nob.h"
 
 #define EXAMPLE_DIR "examples/"
+#define TEST_DIR "tests/"
 #define SRC_DIR "src/"
 #define BUILD_DIR "build/"
 
@@ -32,6 +33,11 @@
 #define WARNING_FLAGS(cmd) cmd_append(cmd, "-Wall", "-Wextra", "-Wpedantic");
 
 Cmd cmd = {};
+
+bool expect_test_to_fail(char *name) {
+  size_t len = strlen(name);
+  return (len >= 5 && strcmp(name + len - 5, "_fail") == 0);
+}
 
 bool create_library(bool dbg) {
 
@@ -94,6 +100,45 @@ bool create_library(bool dbg) {
   return true;
 }
 
+bool build_test(char *name, bool debug, bool run) {
+  if (!mkdir_if_not_exists(BUILD_DIR "tests/"))
+    return false;
+
+  cmd_append(&cmd, "cc");
+  WARNING_FLAGS(&cmd);
+
+  if (debug)
+    cmd_append(&cmd, "-g");
+  else
+    cmd_append(&cmd, "-O3");
+
+  cmd_append(&cmd, "-I", LIB_DIR "include");
+
+  String_Builder source_path = {};
+  String_Builder exe_path = {};
+
+  nob_sb_appendf(&source_path, TEST_DIR "%s.c", name);
+  nob_sb_appendf(&exe_path, BUILD_DIR "tests/%s", name);
+
+  cmd_append(&cmd, source_path.items);
+  cmd_append(&cmd, "-L", LIB_DIR "lib");
+  cmd_append(&cmd, LINK_FLAGS);
+  cmd_append(&cmd, "-o", exe_path.items);
+
+  if (!cmd_run(&cmd))
+    return false;
+
+  nob_log(NOB_INFO, "Built test: %s", exe_path.items);
+
+  if (run) {
+    cmd_append(&cmd, exe_path.items);
+    if (!cmd_run(&cmd))
+      return false;
+  }
+
+  return true;
+}
+
 bool build_example(char *name, bool debug) {
   cmd_append(&cmd, "cc");
   WARNING_FLAGS(&cmd);
@@ -132,6 +177,7 @@ void print_help() {
   nob_log(NOB_INFO, "");
   nob_log(NOB_INFO,
           "If example_name is provided, the specified example will be built.");
+  nob_log(NOB_INFO, "Use `tests` as the name to build and run all tests.");
 }
 
 struct args {
@@ -178,14 +224,56 @@ int main(int argc, char **argv) {
     return 1;
 
   if (args.example_name != NULL) {
-    if (!build_example(args.example_name, args.debug))
-      return 1;
-    if (args.run) {
-      String_Builder exe_path = {};
-      nob_sb_appendf(&exe_path, BUILD_DIR "%s", args.example_name);
-      cmd_append(&cmd, exe_path.items);
-      if (!cmd_run(&cmd))
+    if (strcmp(args.example_name, "tests") == 0) {
+      Nob_File_Paths test_files = {0};
+
+      if (!nob_read_entire_dir(TEST_DIR, &test_files))
         return 1;
+
+      size_t failed_tests = 0;
+      size_t total_tests = 0;
+
+      for (size_t i = 0; i < test_files.count; i++) {
+        const char *test_file_raw = test_files.items[i];
+        size_t len = strlen(test_file_raw);
+
+        if (len < 3 || strcmp(test_file_raw + len - 2, ".c") != 0)
+          continue; // not a .c file
+
+        char *test_file = strdup(test_file_raw);
+        test_file[len - 2] = '\0'; // remove .c extension
+        len = strlen(test_file);
+        total_tests++;
+
+        bool should_fail =
+            (len >= 5 && strcmp(test_file + len - 5, "_fail") == 0);
+
+        bool passed = build_test(test_file, args.debug, true);
+        if (passed != !should_fail) {
+          failed_tests++;
+          nob_log(NOB_ERROR, "(%zu) Test '%s' failed", i + 1, test_file);
+        } else {
+          nob_log(NOB_INFO, "(%zu) Test '%s' passed", i + 1, test_file);
+        }
+      }
+
+      if (failed_tests > 0) {
+        nob_log(NOB_ERROR, "%zu/%zu tests failed", failed_tests, total_tests);
+        return 1;
+      } else {
+        nob_log(NOB_INFO, "All %zu tests passed", total_tests);
+      }
+
+    } else {
+      if (!build_example(args.example_name, args.debug))
+        return 1;
+      if (args.run) {
+        String_Builder exe_path = {};
+        nob_sb_appendf(&exe_path, BUILD_DIR "%s", args.example_name);
+        cmd_append(&cmd, exe_path.items);
+        if (!cmd_run(&cmd))
+          return 1;
+      }
     }
   }
   return 0;
