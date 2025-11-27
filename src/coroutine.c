@@ -13,10 +13,7 @@
 #include "array.h"
 #include "coroutine.h"
 
-
-/*================================================================================================*\
-|                                       Private Types                                              |
-\*================================================================================================*/
+/* Private Types */
 
 struct s_ctx {
   void *rsp;
@@ -25,9 +22,14 @@ struct s_ctx {
   size_t stack_size;
 };
 
+struct s_coroutines {
+  da_struct(sp_ctx);
+};
+
 struct s_stack {
   // Dynamic array of coroutine contexts
-  da_struct(sp_ctx);
+  struct s_coroutines active_ctxs;
+  struct s_coroutines inactive_ctxs;
 
   // Current context index
   size_t current_index;
@@ -42,10 +44,7 @@ struct s_stack {
 // Current coroutine context (NULL for main context)
 // size_t current_ctx_id = INVALID_CTX_ID;
 
-
-/*================================================================================================*\
-|                                 Platform Specific Functions                                      |
-\*================================================================================================*/
+/* Platform Specific Functions */
 
 /**
  * @brief restore context from rsp
@@ -64,23 +63,20 @@ void switch_ctx(sp_stack, sp_ctx);
  */
 void yield_ctx(sp_stack);
 
-void *platform_setup_stack(void*, sp_func, sp_stack, void*);
+void *platform_setup_stack(void *, sp_func, sp_stack, void *);
 
-
-/*================================================================================================*\
-|                                    Private Functions                                             |
-\*================================================================================================*/
+/* Private Functions */
 
 void coroutine_finish(sp_stack stack) {
   size_t current_ctx_id = stack->current_index;
   assert(current_ctx_id != 0 && "Main context cannot finish");
 
-  sp_ctx current_ctx = stack->items[current_ctx_id];
+  sp_ctx current_ctx = stack->active_ctxs.items[current_ctx_id];
   current_ctx->is_done = true; // mark as done
 
-  da_fast_remove(stack, current_ctx_id);
+  da_fast_remove(&stack->active_ctxs, current_ctx_id);
 
-  sp_ctx ctx = stack->items[--stack->current_index];
+  sp_ctx ctx = stack->active_ctxs.items[--stack->current_index];
   _asm_restore_ctx(ctx->rsp);
 
   // Unreachable code here
@@ -94,8 +90,8 @@ size_t get_ctx_id_of(sp_stack stack, sp_ctx ctx) {
   if (ctx == NULL)
     return 0; // Main context
 
-  for (size_t i = 0; i < stack->count; i++) {
-    if (stack->items[i] == ctx) {
+  for (size_t i = 0; i < stack->active_ctxs.count; i++) {
+    if (stack->active_ctxs.items[i] == ctx) {
       return i;
     }
   }
@@ -103,13 +99,13 @@ size_t get_ctx_id_of(sp_stack stack, sp_ctx ctx) {
   return INVALID_CTX_ID;
 }
 
-__attribute__((naked))
-void switch_ctx_inner(sp_stack stack, sp_ctx ctx, void *rsp) {
+__attribute__((noreturn)) void switch_ctx_inner(sp_stack stack, sp_ctx ctx,
+                                                void *rsp) {
   if (ctx == NULL) {
-    ctx = stack->items[0]; // Main context
+    ctx = stack->active_ctxs.items[0]; // Main context
   }
 
-  sp_ctx current_ctx = stack->items[stack->current_index];
+  sp_ctx current_ctx = stack->active_ctxs.items[stack->current_index];
   // Save current rsp
   current_ctx->rsp = rsp;
 
@@ -119,60 +115,63 @@ void switch_ctx_inner(sp_stack stack, sp_ctx ctx, void *rsp) {
 
   // Switch contexts
   _asm_restore_ctx(ctx->rsp);
+
+  abort(); // Unreachable
 }
 
-__attribute__((naked))
-void yield_ctx_inner(sp_stack stack, void *rsp) {
+__attribute__((noreturn)) void yield_ctx_inner(sp_stack stack, void *rsp) {
 
-  sp_ctx current_ctx = stack->items[stack->current_index];
+  sp_ctx current_ctx = stack->active_ctxs.items[stack->current_index];
   // Save current rsp
   current_ctx->rsp = rsp;
 
   if (stack->current_index == 0) {
-    stack->current_index = stack->count - 1; // Switch to last context
+    stack->current_index =
+        stack->active_ctxs.count - 1; // Switch to last context
   } else {
-    stack->current_index--;                  // Switch to previous context
+    stack->current_index--; // Switch to previous context
   }
 
-  sp_ctx ctx = stack->items[stack->current_index];
+  sp_ctx ctx = stack->active_ctxs.items[stack->current_index];
 
   // Switch contexts
   _asm_restore_ctx(ctx->rsp);
+
+  abort(); // Unreachable
 }
 
-
-/*================================================================================================*\
-|                                     Public Functions                                             |
-\*================================================================================================*/
+/* Public Functions */
 
 sp_stack init_stack(size_t stack_capacity) {
-    if (stack_capacity == 0) stack_capacity = STACK_CAPACITY;
+  if (stack_capacity == 0)
+    stack_capacity = STACK_CAPACITY;
 
-    sp_stack stack = malloc(sizeof(*stack));
-    da_init(stack);
+  sp_stack stack = malloc(sizeof(*stack));
+  da_init(&stack->active_ctxs);
 
-    stack->current_index = 0;
-    stack->stack_size = stack_capacity;
+  stack->current_index = 0;
+  stack->stack_size = stack_capacity;
 
-    // Setup main context (caller thread)
-    sp_ctx ctx = malloc(sizeof(*ctx));
-    ctx->rsp = NULL;
-    ctx->stack_base = NULL;
+  // Setup main context (caller thread)
+  sp_ctx ctx = malloc(sizeof(*ctx));
+  ctx->rsp = NULL;
+  ctx->stack_base = NULL;
 
-    da_append(stack, ctx);
+  da_append(&stack->active_ctxs, ctx);
 
-    return stack;
+  return stack;
 }
 
 void deinit_stack(sp_stack stack) {
-    assert(stack->count == 1 && "All coroutines must be destroyed before deinitializing the stack");
+  assert(stack->active_ctxs.count == 1 &&
+         "All coroutines must be destroyed before deinitializing the stack");
 
-    free(stack->items[0]); // Destroy main context (only free as no mmap was used)
+  free(stack->active_ctxs
+           .items[0]); // Destroy main context (only free as no mmap was used)
 
-    da_free(stack);
-    free(stack);
+  da_free(&stack->active_ctxs);
+  free(stack);
 }
-
 
 /**
  * @brief Create a new coroutine context
@@ -199,11 +198,11 @@ sp_ctx create_ctx(sp_stack stack, sp_func fn, void *arg) {
   assert(ctx->stack_base != MAP_FAILED &&
          "Failed to allocate stack for coroutine");
 
-  ctx->rsp = platform_setup_stack(ctx->stack_base + stack->stack_size, fn,
-                                  stack, arg);
+  ctx->rsp =
+      platform_setup_stack(ctx->stack_base + stack->stack_size, fn, stack, arg);
   ctx->is_done = false;
 
-  da_append(stack, ctx);
+  da_append(&stack->active_ctxs, ctx);
 
   return ctx;
 }
@@ -227,12 +226,11 @@ bool is_ctx_finished(sp_ctx ctx) {
   return ctx->is_done;
 }
 
-
 sp_ctx get_ctx(sp_stack stack) {
   size_t idx = get_ctx_id(stack);
   if (idx == 0)
     return NULL; // Main context
 
   assert(idx != INVALID_CTX_ID && "No current context");
-  return stack->items[idx];
+  return stack->active_ctxs.items[idx];
 }
