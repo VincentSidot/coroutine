@@ -10,20 +10,30 @@
 #endif // STACK_CAPACITY
 
 // Opaque coroutine context type
-typedef struct s_ctx* sp_ctx;
+typedef struct s_ctx *sp_ctx;
+
+// Opaque stack type
+typedef struct s_stack *sp_stack;
+
 
 /**
  * Coroutine function type and finalizer function type
  * coroutine: function that takes a void* argument and returns void
  */
-typedef void (*coroutine) (void*);
-
-// Internal finalizer function type
-typedef void (*finalizer) (void);
+typedef void (*sp_func) (sp_stack, void*);
 
 /*
     * Coroutine management functions
 */
+
+/**
+ * @brief Initialize a new stack for coroutines
+ * @param stack_capacity The capacity of the stack in bytes (if 0, use default STACK_CAPACITY)
+ * @return Stack object
+ */
+extern sp_stack init_stack(size_t stack_capacity);
+
+extern void deinit_stack(sp_stack stack);
 
 /**
  * @brief Create a new coroutine context
@@ -31,7 +41,7 @@ typedef void (*finalizer) (void);
  * @param arg The argument to pass to the coroutine function
  * @return Coroutine context object
  */
-extern sp_ctx create_ctx(coroutine fn, void* arg);
+extern sp_ctx create_ctx(sp_stack stack, sp_func fn, void* arg);
 
 /**
  * @brief Destroy a coroutine context
@@ -50,23 +60,17 @@ extern bool is_ctx_finished(sp_ctx ctx);
  * @brief Switch to the given coroutine context
  * @param ctx The coroutine context to switch to (NULL for main context)
  */
-extern void switch_ctx(sp_ctx ctx);
+extern void switch_ctx(sp_stack stack, sp_ctx ctx);
 
 /**
  * @brief Yield execution from the current coroutine context back to the caller
  */
-extern void yield_ctx(void);
-
-/**
- * @brief Get the ID of the current coroutine context
- * @return The ID of the current coroutine context (0 for main context)
- */
-extern size_t get_ctx_id(void);
+extern void yield_ctx(sp_stack stack);
 
 /**
  * @brief Get a pointer to the current coroutine context
  * @return Pointer to the current coroutine context (NULL for main context)
  */
-extern sp_ctx get_ctx_ptr(void);
+extern sp_ctx get_ctx(sp_stack stack);
 
 #endif // _COROUTINE_H

@@ -108,6 +108,16 @@ bool build_example(char* name, bool debug) {
 
 }
 
+void print_help() {
+    nob_log(NOB_INFO, "Usage: build_tool [options] [example_name]");
+    nob_log(NOB_INFO, "Options:");
+    nob_log(NOB_INFO, "  -g, --debug       Build with debug symbols");
+    nob_log(NOB_INFO, "  -r, --run         Run the example after building");
+    nob_log(NOB_INFO, "  -h, --help        Show this help message");
+    nob_log(NOB_INFO, "");
+    nob_log(NOB_INFO, "If example_name is provided, the specified example will be built.");
+}
+
 struct args {
     bool debug;
     bool run;
@@ -116,15 +126,20 @@ struct args {
 
 bool parse_args(struct args* args, int argc, char** argv) {
 
+    #define check(ref) (strcmp(argv[i], ref) == 0)
+
     args->debug = false;
     args->run = false;
     args->example_name = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-g") == 0) {
+        if (check("--debug") || check("-g")) {
             args->debug = true;
-        } else if (strcmp(argv[i], "--run") == 0 || strcmp(argv[i], "-r") == 0) {
+        } else if (check("--run") || check("-r")) {
             args->run = true;
+        } else if (check("--help") || check("-h")) {
+            print_help();
+            exit(0);
         } else {
             args->example_name = argv[i];
         }

@@ -52,9 +52,18 @@ _yield_ctx:
     bl      _yield_ctx_inner
 
 // Entry trampoline for a new coroutine
-// x19: arg, x20: fn, x21: coroutine_finish
+// x19: stack, x20: arg, x21: fn, x22: coroutine_finish
 __coroutine_entry:
-    mov     x0, x19      // arg
+    mov     x0, x19      // stack
+    mov     x1, x20      // arg
     mov     x9, x20      // fn pointer
     mov     x30, x21     // set return address to coroutine_finish
     br      x9
+
+// Finish trampoline for a coroutine
+// stack pointer is in stack frame
+__coroutine_finish:
+    mov     x0, sp            // stack
+    bl      _coroutine_finish // jump to finish function
+    // Should not return here
+    brk     #0
