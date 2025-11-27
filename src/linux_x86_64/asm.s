@@ -41,6 +41,7 @@ _asm_restore_ctx:
 */
 _coroutine_finish:
     popq %rdi                 /* Get the stack pointer address */
+    subq $8, %rsp             /* Align stack to 16 bytes */
     jmp coroutine_finish      /* Jump to the finish handler */
 
 /*

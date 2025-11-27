@@ -198,8 +198,8 @@ sp_ctx create_ctx(sp_stack stack, sp_func fn, void *arg) {
   assert(ctx->stack_base != MAP_FAILED &&
          "Failed to allocate stack for coroutine");
 
-  ctx->rsp =
-      platform_setup_stack(ctx->stack_base + stack->stack_size, fn, stack, arg);
+  ctx->rsp = platform_setup_stack((char *)ctx->stack_base + stack->stack_size,
+                                  fn, stack, arg);
   ctx->is_done = false;
 
   da_append(&stack->active_ctxs, ctx);
@@ -207,13 +207,28 @@ sp_ctx create_ctx(sp_stack stack, sp_func fn, void *arg) {
   return ctx;
 }
 
+void unregister_ctx(sp_stack stack, sp_ctx ctx) {
+  assert(ctx != get_ctx(stack) && "Cannot unregister main or current context");
+
+  size_t idx = get_ctx_id_of(stack, ctx);
+  if (idx != INVALID_CTX_ID) {
+    da_fast_remove(&stack->active_ctxs, idx);
+    if (stack->current_index >= idx && stack->current_index > 0) {
+      stack->current_index--;
+    }
+  }
+}
+
 /**
  * @brief Destroy a coroutine context
  *
  * @param ctx The coroutine context to destroy
+ *
+ * @warning Cannot destroy the main context or a non-finished context
  */
 void destroy_ctx(sp_ctx ctx) {
   assert(ctx != NULL && "Cannot destroy main context");
+  assert(ctx->is_done && "Cannot destroy a non-finished context");
 
   munmap(ctx->stack_base, ctx->stack_size);
   free(ctx);
