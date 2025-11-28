@@ -1,15 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "coroutine.h"
-
-#define ASSERT_TRUE(cond, msg)                                                \
-  do {                                                                        \
-    if (!(cond)) {                                                            \
-      fprintf(stderr, "FAIL: %s:%d: %s\n", __FILE__, __LINE__, (msg));        \
-      return 1;                                                               \
-    }                                                                         \
-  } while (0)
+#include "../src/coroutine.h"
+#include "utils.h"
 
 struct rec {
   int id;
@@ -72,7 +65,8 @@ int main(void) {
       break;
     }
   }
-  ASSERT_TRUE(first_non_main == 2, "Yield rotation should start with newest ctx");
+  ASSERT_TRUE(first_non_main == 2,
+              "Yield rotation should start with newest ctx");
 
   printf("test_yield_order passed\n");
   return 0;

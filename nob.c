@@ -251,9 +251,9 @@ int main(int argc, char **argv) {
         bool passed = build_test(test_file, args.debug, true);
         if (passed != !should_fail) {
           failed_tests++;
-          nob_log(NOB_ERROR, "(%zu) Test '%s' failed", i + 1, test_file);
+          nob_log(NOB_ERROR, "(%zu) Test '%s' failed", total_tests, test_file);
         } else {
-          nob_log(NOB_INFO, "(%zu) Test '%s' passed", i + 1, test_file);
+          nob_log(NOB_INFO, "(%zu) Test '%s' passed", total_tests, test_file);
         }
       }
 

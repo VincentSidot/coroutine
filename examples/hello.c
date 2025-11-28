@@ -1,6 +1,7 @@
-#include "coroutine.h"
 #include <assert.h>
 #include <stdio.h>
+
+#include "../src/coroutine.h"
 
 void greet(sp_stack stack, char *name) {
   printf("Oh hi %s!\n", name);
@@ -14,7 +15,9 @@ void greet(sp_stack stack, char *name) {
   return;
 }
 
-int main() {
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
   sp_stack stack = init_stack(0);
 
   sp_ctx ctx = create_ctx(stack, (sp_func)greet, "Marc");

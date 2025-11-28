@@ -1,34 +1,36 @@
 #include <stdio.h>
-#include "coroutine.h"
 
-void cpt(sp_stack stack, int cpt) {
+#include "../src/coroutine.h"
 
-    printf("Running coroutine cpt for %d\n", cpt);
+void cpt(sp_stack stack, void *arg) {
+  int cpt = (int)(size_t)arg;
 
-    for(int i = 0; i < cpt; i++) {
-        printf("[%p] i = %d\n", get_ctx(stack),i);
-        fflush(stdout);
+  printf("Running coroutine cpt for %d\n", cpt);
 
-        yield_ctx(stack);
-    }
+  for (int i = 0; i < cpt; i++) {
+    printf("[%p] i = %d\n", (void *)get_ctx(stack), i);
+    fflush(stdout);
 
-    return;
+    yield_ctx(stack);
+  }
+
+  return;
 }
 
-int main() {
-    sp_stack stack = init_stack(0); // default stack size
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+  sp_stack stack = init_stack(0); // default stack size
 
+  sp_ctx ctx1 = create_ctx(stack, cpt, (void *)(size_t)10);
+  sp_ctx ctx2 = create_ctx(stack, cpt, (void *)(size_t)25);
 
-    sp_ctx ctx1 = create_ctx(stack, (void*) cpt, (void*)(size_t)10);
-    sp_ctx ctx2 = create_ctx(stack, (void*) cpt, (void*)(size_t)25);
+  while (!is_ctx_finished(ctx1) || !is_ctx_finished(ctx2)) {
+    yield_ctx(stack);
+  }
 
+  destroy_ctx(ctx1);
+  destroy_ctx(ctx2);
 
-    while (!is_ctx_finished(ctx1) || !is_ctx_finished(ctx2)) {
-        yield_ctx(stack);
-    }
-
-    destroy_ctx(ctx1);
-    destroy_ctx(ctx2);
-
-    deinit_stack(stack);
+  deinit_stack(stack);
 }

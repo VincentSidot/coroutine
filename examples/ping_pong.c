@@ -1,48 +1,53 @@
 #include <stdio.h>
-#include "coroutine.h"
+
+#include "../src/coroutine.h"
 
 typedef struct {
-    const char* label;
-    int turns;
-    sp_ctx partner;
+  const char *label;
+  int turns;
+  sp_ctx partner;
 } PingPongArgs;
 
-void ping_pong(sp_stack stack, PingPongArgs* args) {
+void ping_pong(sp_stack stack, void *args) {
+  PingPongArgs *ping = (PingPongArgs *)args;
 
-    for (int i = 1; i <= args->turns; i++) {
-        printf("[%s | ctx %p] turn %d\n", args->label, get_ctx(stack), i);
-        fflush(stdout);
+  for (int i = 1; i <= ping->turns; i++) {
+    printf("[%s | ctx %p] turn %d\n", ping->label, (void *)get_ctx(stack), i);
+    fflush(stdout);
 
-        if (args->partner && !is_ctx_finished(args->partner)) {
-            switch_ctx(stack, args->partner);
-        } else {
-            yield_ctx(stack);
-        }
+    if (ping->partner && !is_ctx_finished(ping->partner)) {
+      switch_ctx(stack, ping->partner);
+    } else {
+      yield_ctx(stack);
     }
+  }
 }
 
-int main(void) {
-    PingPongArgs ping = {.label = "ping", .turns = 5, .partner = NULL};
-    PingPongArgs pong = {.label = "pong", .turns = 5, .partner = NULL};
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
 
-    sp_stack stack = init_stack(16384);
+  PingPongArgs ping = {.label = "ping", .turns = 5, .partner = NULL};
+  PingPongArgs pong = {.label = "pong", .turns = 5, .partner = NULL};
 
-    sp_ctx ping_ctx = create_ctx(stack, (void*)ping_pong, &ping);
-    sp_ctx pong_ctx = create_ctx(stack, (void*)ping_pong, &pong);
+  sp_stack stack = init_stack(16384);
 
-    ping.partner = pong_ctx;
-    pong.partner = ping_ctx;
+  sp_ctx ping_ctx = create_ctx(stack, ping_pong, &ping);
+  sp_ctx pong_ctx = create_ctx(stack, ping_pong, &pong);
 
-    switch_ctx(stack, ping_ctx);
+  ping.partner = pong_ctx;
+  pong.partner = ping_ctx;
 
-    while (!is_ctx_finished(ping_ctx) || !is_ctx_finished(pong_ctx)) {
-        yield_ctx(stack);
-    }
+  switch_ctx(stack, ping_ctx);
 
-    destroy_ctx(ping_ctx);
-    destroy_ctx(pong_ctx);
+  while (!is_ctx_finished(ping_ctx) || !is_ctx_finished(pong_ctx)) {
+    yield_ctx(stack);
+  }
 
-    deinit_stack(stack);
+  destroy_ctx(ping_ctx);
+  destroy_ctx(pong_ctx);
 
-    return 0;
+  deinit_stack(stack);
+
+  return 0;
 }

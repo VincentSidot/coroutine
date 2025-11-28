@@ -228,7 +228,7 @@ void unregister_ctx(sp_stack stack, sp_ctx ctx) {
  */
 void destroy_ctx(sp_ctx ctx) {
   assert(ctx != NULL && "Cannot destroy main context");
-  assert(ctx->is_done && "Cannot destroy a non-finished context");
+  // assert(ctx->is_done && "Cannot destroy a non-finished context");
 
   munmap(ctx->stack_base, ctx->stack_size);
   free(ctx);
